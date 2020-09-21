@@ -1,0 +1,519 @@
+;;; dots-boxes.lisp
+;;; Definicao de um serviço web para o jogo dos pontos e das caixas, comum com a disciplina de computação móvel. O serviço web é baseado no servidor Aserve e na framework Simple Server.  Permite criar uma aplicação web baseada em JSON.
+;;; Adapted from https://www.cs.northwestern.edu/academics/courses/325/readings/web-services.php#simple-server
+;;; JSON server built on Simple Server
+;;;
+;;; Defines STOP-SERVER and PARAM-VALUE
+;;; Needs server-specific implementations of DEFROUTE and START-SERVER
+
+(defpackage #:140221017-140221002
+  (:use #:common-lisp #:json #:simple-server))
+
+(in-package :140221017-140221002)
+
+;;;
+;;; Key parts:
+;;;   - static HTML5 files (HTML, CSS, JavaScript, images, ...)
+;;;   - JavaScript in browser sends and gets JSON from the server, using AJAX
+;;;   - Lisp code on server gets data from request parameters and JSON, and returns JSON
+;;;
+;;;
+;;; One form lets a user store a key-value pair on the server, and get back a JSON
+;;; object with all stored key value pairs. This example illustrates sending data in JSON form.
+;;;
+
+
+
+;;; Publishing routes to JSON endpoints
+;;; -----------------------------------
+
+
+;;; POST /save-data?name=... + JSON data
+;;;   Push the list equivalent of the JSON data in the global Lisp
+;;;   variable name
+;;;   Return the new list of stored values.
+
+(defroute :post "/save-data" 'save-data)
+
+;;Variaveis globais
+(defvar *alist* nil)
+(defvar *jogador2* 2)
+(defvar *jogador1* 1)
+(defvar *numero-cortes-alfa* 0)
+(defvar *numero-cortes-beta* 0)
+(defvar *jogada-maquina* nil)
+
+(defun save-data (data params)
+  (encode-json-alist-to-string (update-alist (get-json-from-string data))))
+
+(defun get-json-from-string (str)
+  (and str (stringp str) (> (length str) 0)
+       (decode-json-from-string str)))
+
+(defun update-alist (alist)
+  "Atualiza a lista com a jogada da maquina"
+  (setq *alist*  (formatar-saida (jogar alist))))
+
+
+(defun formatar-saida (tabuleiro)
+  "Permite formatar o tabuleiro com a jogada do PC antes de ser transformado numa string JSON"
+    (list (list ':tabuleiro (get-arcos-horizontais tabuleiro) (get-arcos-verticais tabuleiro)))
+  )
+
+
+;;; ------------------------------
+;;; Jogada da maquina
+;;; O código a seguir deverá ser alterado para permitir jogadas com o algoritmo AlfaBeta
+;;; A funcao jogar é o ponto de entrada para a execução da jogada da maquina
+;;; ------------------------------
+
+;;; faz jogada aleatoria nos arcos horizontais
+(defun jogar (jogada-anterior)
+    "Efetua uma jogada para o jogador maquina com base nos dados do jogo recebidos: tabuleiro, peca da maquina,
+     numero de caixas do jogador com as pecas 1 e numero de caixas do jogador com as pecas 2."
+    (let* (
+      (peca (get-peca-maquina-json jogada-anterior))
+      (tabuleiro (get-tabuleiro-json jogada-anterior))
+	  (caixas-jogador-1-json (get-numero-caixas-jogador1 jogada-anterior))
+	  (caixas-jogador-2-json (get-numero-caixas-jogador2 jogada-anterior))
+	  (no-react (tabuleiro 0 0 caixas-jogador-1-json caixas-jogador-2-json)))
+	  (progn 
+		(alfabeta no-react 4 'utilidade 'sucessores (operadores) peca 1 caixas-jogador-1-json caixas-jogador-2-json) 
+		*jogada-maquina*
+	  )
+    )
+ )
+
+ 	(defun alfabeta (no profundidade-max f-utilidade f-sucessores lista-operadores simbolo min-max caixas-jogador1 caixas-jogador2 &optional (alfa -10000) (beta 10000))
+	(let ((sucessores (funcall f-sucessores no lista-operadores profundidade-max f-utilidade caixas-jogador1 caixas-jogador2 simbolo)))
+		(cond
+			((or (is-folhap no lista-operadores profundidade-max f-utilidade  caixas-jogador1 caixas-jogador2 simbolo f-sucessores)(= profundidade-max 0)) (funcall f-utilidade no simbolo))
+			((= min-max 1) (f-max sucessores profundidade-max f-utilidade f-sucessores lista-operadores simbolo caixas-jogador1 caixas-jogador2 alfa beta))
+			(T (f-min sucessores profundidade-max f-utilidade f-sucessores lista-operadores simbolo caixas-jogador1 caixas-jogador2 alfa beta))
+		)
+	)
+)
+
+(defun f-max (sucessores profundidade-max f-utilidade f-sucessores lista-operadores simbolo caixas-jogador1 caixas-jogador2 alfa beta)
+	(let ((value-linha (alfabeta (car sucessores) (1- profundidade-max) f-utilidade f-sucessores lista-operadores (trocar-peca simbolo) 0 caixas-jogador1 caixas-jogador2 alfa beta)))
+	(progn
+		(cond
+			((> value-linha alfa)
+					(setf *jogada-maquina* (get-tabuleiro (car sucessores)))
+			)
+		)
+		(cond
+			((>= value-linha beta) 
+				(progn (setf *numero-cortes-beta* (1+ *numero-cortes-beta*)) beta)
+			)
+			((null (cdr sucessores)) value-linha)
+			(T (f-max (cdr sucessores) profundidade-max f-utilidade f-sucessores lista-operadores simbolo caixas-jogador1 caixas-jogador2 value-linha beta))
+		)
+	)
+	)
+)
+
+(defun f-min (sucessores profundidade-max f-utilidade f-sucessores lista-operadores simbolo caixas-jogador1 caixas-jogador2 alfa beta)
+	(let ((value-linha (alfabeta (car sucessores) (1- profundidade-max) f-utilidade f-sucessores lista-operadores (trocar-peca simbolo) 1 caixas-jogador1 caixas-jogador2 alfa beta)))
+		(cond
+			((null (cdr sucessores)) value-linha)
+			((<= value-linha alfa) (progn (setf *numero-cortes-alfa* (1+ *numero-cortes-alfa*)) alfa))
+			(T (f-min (cdr sucessores) profundidade-max f-utilidade f-sucessores lista-operadores simbolo caixas-jogador1 caixas-jogador2 alfa value-linha))
+		)
+	)
+)
+
+;;função utilidade
+(defun utilidade (no simbolo)
+	(cond
+		((= simbolo *jogador1*)(cond ((> (get-caixas-jogador1 no) (get-caixas-jogador2 no)) 100) (T -100)))
+		((= simbolo *jogador2*)(cond ((> (get-caixas-jogador2 no) (get-caixas-jogador1 no)) 100) (T -100)))
+		(T 0)
+	)
+)
+
+
+;;is-folhap
+(defun is-folhap (no lista-operadores profundidade-max f-utilidade  caixas-jogador1 caixas-jogador2 simbolo f-sucessores) "Funcao que verifica se um no e folha"
+	(cond 
+		((or 
+		(null (funcall f-sucessores no lista-operadores profundidade-max f-utilidade caixas-jogador1 caixas-jogador2 simbolo))
+		(= (get-profundidade no) profundidade-max)) T)
+		(T nil)
+	)
+)
+ 
+ 
+ 
+	;;; Manipulacao dos dados do jogo
+	(defun get-tabuleiro-json (jogada-anterior)
+	"Retorna o tabuleiro a partir dos dados do jogo recebidos"
+	(list (second (cadar jogada-anterior)) (third (cadar jogada-anterior)))
+	)
+
+	(defun get-numero-caixas-json (jogada-anterior)
+	"Retorna o numero de caixas fechadas no tabuleiro a partir dos dados do jogo recebidos"
+	(+ (cdr (fourth (car jogada-anterior))) (cdr (fifth (car jogada-anterior))))
+	)
+	
+	(defun get-numero-caixas-jogador1 (jogada-anterior)
+	"Retorna o numero de caixas fechadas no tabuleiro do jogador1"
+		(cdr (fourth (car jogada-anterior)))
+	)
+	
+	(defun get-numero-caixas-jogador2 (jogada-anterior)
+	"Retorna o numero de caixas fechadas no tabuleiro do jogador2"
+		(cdr (fifth (car jogada-anterior)))
+	)
+
+	(defun get-peca-maquina-json (jogada-anterior)
+	"Retorna o simbolo (1 ou 2)com o qual a maquina joga"
+	(cdr (third (car jogada-anterior)))
+	)
+
+	;;Contrutor do no
+	(defun constroi-no (tabuleiro &optional (g 0) (utilidade 0) (caixas-jogador1 0) (caixas-jogador2 0))
+	"Funcao construtora de um no"
+		(list tabuleiro g utilidade caixas-jogador1 caixas-jogador2)
+	)
+
+	;;;Seletores
+
+	;;get-tabuleiro (no)
+	(defun get-tabuleiro(no) "Funcao que devolve o tabuleiro de um no"
+		(cond
+			((null no) nil)
+			(T (car no))
+		)
+	)
+
+
+  ;;; Manipulacao do tabuleiro
+
+	;;get-arcos-verticais(tabuleiro)
+	(defun get-arcos-verticais (tabuleiro) "Funcao que devolve o conjunto de arcos verticais de um no"
+		(cadr tabuleiro)
+	)
+
+
+	;;get-arcos-horizontais (tabuleiro)
+	(defun get-arcos-horizontais (tabuleiro) "Funcao que devolve o conjunto de arcos horizontais de um no"
+		(car tabuleiro)
+	)
+
+
+	;;get-conjunto-arcos(linha-coluna horizontais-verticais)
+	(defun get-conjunto-arcos (linha-coluna horizontais-verticais) "Funcao que devolve um conjunto de arcos da lista de arcos horizontais ou verticais"
+		(cond
+			((null horizontais-verticais) nil)
+			((> linha-coluna 1) (get-conjunto-arcos (- linha-coluna 1) (cdr horizontais-verticais)))
+			(T(car horizontais-verticais))
+		)
+	)
+
+
+	;;get-arco-posicao(posicao conjunto-arcos)
+	(defun get-arco-posicao (posicao conjunto-arcos) "Funcao que devolve um arco numa posicao de um conjunto de arcos"
+		(cond
+			((null conjunto-arcos) nil)
+			((> posicao 1) (get-arco-posicao (- posicao 1) (cdr conjunto-arcos)))
+			(T (car conjunto-arcos))
+		)
+	)
+
+
+	;;get-profundidade
+	(defun get-profundidade(no) "Funcao que devolve a profundidade de um no"
+		(cond
+			((null no) nil)
+			(T (cadr no))
+		)
+	)
+
+
+	;;get-heuristica
+	(defun get-heuristica(no) "Funcao que devolve a heuristica de um no"
+		(cond
+			((null no) nil)
+			(T (caddr no))
+		)
+	)
+
+
+	;;get-caixas-jogador1
+	(defun get-caixas-jogador1(no) "Funcao que devolve numero de caixas do jogador 1 de um no"
+		(cond
+			((null no) nil)
+			(T (cadddr no))
+		)
+	)
+
+	;;get-caixas-jogador2
+	(defun get-caixas-jogador2(no) "Funcao que devolve numero de caixas do jogador 2 de um no"
+		(cond
+			((null no) nil)
+			(T (cadr (cdddr no)))
+		)
+	)
+
+
+
+	;;get-custo
+	(defun get-custo (no) "Funcao que devolve o custo F de um no"
+		(+ (get-heuristica no) (get-profundidade no))
+	)
+
+
+
+	;;;Operadores 
+
+		(defun operadores () "Define uma lista de operadores do problema"
+			(list 'colocar-arco-vertical 'colocar-arco-horizontal)
+		)
+
+	;;colocar-arco-vertical (coluna linha tabuleiro)
+	(defun colocar-arco-vertical (coluna linha tabuleiro simbolo) "Função que coloca a peça correspondente ao jogador num arco vertical numa linha posicao de um tabuleiro"
+		(let ((novos-verticais (colocar-arco-aux coluna linha (get-arcos-verticais tabuleiro) simbolo)))
+			(cond
+				((null tabuleiro) nil)
+				((null novos-verticais) nil)
+				(T (list (get-arcos-horizontais tabuleiro) novos-verticais))
+			)
+		)
+	)
+
+
+	;;colocar-arco-horizontal (linha coluna tabuleiro)
+	(defun colocar-arco-horizontal (linha coluna tabuleiro simbolo) "Funcao que coloca a peça correspondente ao jogador num arco horizontal numa linha posicao de um tabuleiro"
+		(let ((novos-horizontais (colocar-arco-aux linha coluna (get-arcos-horizontais tabuleiro) simbolo)))
+			(cond
+				((null tabuleiro) nil)
+				((null novos-horizontais) nil)
+				(T (list novos-horizontais (get-arcos-verticais tabuleiro)))
+			)
+		)
+	)
+
+
+
+	;;;Operadores - Auxiliares
+
+	;;colocar-arco-aux(linha coluna linhas-colunas)
+	(defun colocar-arco-aux (conjuntos posicao linhas-colunas simbolo) "Funcao que coloca um arco nos arcos verticais ou horizontais"
+		(cond
+			((null linhas-colunas) nil)
+			((> conjuntos 1) (cons (car linhas-colunas) (colocar-arco-aux (- conjuntos 1) posicao (cdr linhas-colunas) simbolo)))
+			(T 
+				(let ((novo-conjunto (colocar-arco-posicao posicao (car linhas-colunas) simbolo)))
+					(cond ((null novo-conjunto) nil) 
+						(T (cons novo-conjunto (cdr linhas-colunas)))
+					)
+				)
+			)
+		)
+	)
+
+	;;colocar-arco-posicao (posicao conjunto-arcos)
+	(defun colocar-arco-posicao (posicao conjunto-arcos simbolo) "Funcao que coloca um arco num conjunto de arcos (verticais ou horizontais)"
+		(cond
+			((null conjunto-arcos) nil)
+			((not (null (get-arco-posicao posicao conjunto-arcos))) nil)
+			((> posicao 1) (cons (car conjunto-arcos) (colocar-arco-posicao (- posicao 1) (cdr conjunto-arcos) simbolo)))
+			(T (cons simbolo (cdr conjunto-arcos)))
+		)
+	)
+
+
+	;;;Funcoes de contagem de caixas fechadas
+
+	;;get-numero-caixas-fechadas(conjunto-caixas)
+	;;calcula o numero de caixas fechadas de um conjunto de caixas
+	(defun get-numero-caixas-fechadas (conjunto-caixas) "Funcao que recebe um conjunto de caixas e verifica quantas estão fechadas"
+		(cond
+			((null conjunto-caixas) nil)
+			(T (apply #'+ (mapcar #'(lambda (valor) (cond ((null valor) 0) (T 1)))(mapcar #'(lambda (caixa) (funcall 'fechadap caixa)) conjunto-caixas))))
+		)
+	)
+
+	;;fechadap (caixa)
+	;;predicado que devolve T caso a caixa seja fechada e NIL caso contrario
+	;;A estrutura de uma caixa e uma lista com 4 arcos
+	(defun fechadap (caixa) "Predicado que verifica se uma caixa é fechada"
+		(cond
+			((null caixa) nil)
+			((= 4 (apply #'+ (mapcar #'(lambda (arco) (cond ((null arco) 0) (T 1))) caixa))) T)
+			(T NIL)
+		)
+	)
+
+	;;gera-caixas (tabuleiro)
+	(defun gera-caixas (tabuleiro) "funcao que gera todas as caixas de um tabuleiro"
+		(let ((linhas (1- (length (get-arcos-horizontais tabuleiro)))))
+			(cond
+				((null tabuleiro) nil)
+				(T (gera-caixas-tabuleiro linhas tabuleiro))
+			)
+		)
+	)
+
+
+	;;gera-caixas-tabuleiro(tabuleiro linha)
+	(defun gera-caixas-tabuleiro (linha tabuleiro) "Funcao que gera todas as caixas de um tabuleiro recebendo o numero de linhas do mesmo"
+		(let
+			((numero-de-colunas (1- (length (get-arcos-verticais tabuleiro)))))
+			(cond 
+				((null tabuleiro) nil)
+				((> linha 1) (append (gera-caixas-tabuleiro (1- linha) tabuleiro) (gera-caixas-tabuleiro-linha linha numero-de-colunas tabuleiro)))
+				(T (gera-caixas-tabuleiro-linha linha numero-de-colunas tabuleiro))
+			)
+		)
+	)
+
+
+	;;gera-caixas-tabuleiro-linha (linha colunas tabuleiro)
+	(defun gera-caixas-tabuleiro-linha (linha colunas tabuleiro) "Funcao que gera todas as caixas de uma linha"
+		(cond 
+			((null tabuleiro) nil)
+			((> colunas 1) (append (gera-caixas-tabuleiro-linha linha (1- colunas) tabuleiro) (list (gera-caixa-linha-coluna linha colunas tabuleiro))))
+			(T (list (gera-caixa-linha-coluna linha colunas tabuleiro)))
+		)
+	)
+
+
+	;;gera-caixa-linha-coluna ( linha coluna tabuleiro)
+	(defun gera-caixa-linha-coluna ( linha coluna tabuleiro) "Funcao que recebe uma linha, coluna de uma caixa e um tabuleiro e devolve a caixa nessa posicao "
+		(cond
+			((null tabuleiro) nil)
+			(T
+				(list 
+					(get-arco-posicao coluna (get-conjunto-arcos linha (get-arcos-horizontais tabuleiro))) 
+					(get-arco-posicao coluna (get-conjunto-arcos (1+ linha) (get-arcos-horizontais tabuleiro)))
+					(get-arco-posicao linha (get-conjunto-arcos coluna (get-arcos-verticais tabuleiro))) 
+					(get-arco-posicao linha (get-conjunto-arcos (1+ coluna) (get-arcos-verticais tabuleiro)))
+				)	
+			)
+		)	
+	)
+
+	;(sucessores (constroi-no (tabuleiro-inicial)) (operadores) 100 'utilidade 0 0 *jogador1*)
+
+	;;sucessores (no operadores algoritmo-procura profundidade-max f-heuristica caixas-jogador1 caixas-jogador2 simbolo)
+	(defun sucessores (no operadores profundidade-max f-utilidade caixas-jogador1 caixas-jogador2 simbolo) "Funcao que gera a lista de sucessores"
+		(remove-nil (sucessores-nil no operadores profundidade-max f-utilidade caixas-jogador1 caixas-jogador2 simbolo))
+	)
+
+
+	;;;sucessores-nil 
+	(defun sucessores-nil (no operadores profundidade-max f-utilidade caixas-jogador1 caixas-jogador2 simbolo) "Funcao que gera uma lista de sucessores do no mas com os nils dos que sao iguais ao inicial"
+		(let ((linhas (length (get-arcos-horizontais (get-tabuleiro no)))))
+			(sucessores-aux-linhas no operadores linhas f-utilidade caixas-jogador1 caixas-jogador2 simbolo)
+		)
+	)
+
+	;;sucessores-aux-linhas (no operadores linhas f-heuristica)
+	(defun sucessores-aux-linhas (no operadores linhas f-utilidade caixas-jogador1 caixas-jogador2 simbolo) "Funcao que gera todos os sucessores de um no necessitando do numero total de linhas do no"
+		(let ((colunas (length (get-arcos-verticais (get-tabuleiro no)))))
+			(cond
+				((> linhas 1) (append (sucessores-aux-linhas no operadores (1- linhas) f-utilidade caixas-jogador1 caixas-jogador2 simbolo) (sucessores-aux-linha-colunas no operadores linhas (1- colunas) f-utilidade caixas-jogador1 caixas-jogador2 simbolo)))
+				(T (sucessores-aux-linha-colunas no operadores linhas (1- colunas) f-utilidade caixas-jogador1 caixas-jogador2 simbolo))
+			)
+		)
+	)
+
+	;;sucessores-aux-linha-colunas (no operadores linha colunas f-heuristica)
+	(defun sucessores-aux-linha-colunas (no operadores linha colunas f-utilidade caixas-jogador1 caixas-jogador2 simbolo) "Funcao que gera os sucessores para uma linha do tabuleiro do no"
+		(cond
+			((> colunas 1) (append (sucessores-aux-linha-colunas no operadores linha (1- colunas) f-utilidade caixas-jogador1 caixas-jogador2 simbolo) (sucessores-aux-linha-coluna no operadores linha colunas f-utilidade caixas-jogador1 caixas-jogador2 simbolo)))
+			(T (sucessores-aux-linha-coluna no operadores linha colunas f-utilidade caixas-jogador1 caixas-jogador2 simbolo))
+		)
+	)
+
+	;;sucessores-aux 
+	(defun sucessores-aux-linha-coluna (no operadores linha coluna f-utilidade caixas-jogador1 caixas-jogador2 simbolo) "Funcao que gera 2 nos sucessores 1 por cada operador sobre uma posicao"
+		(mapcar #'(lambda (op) 
+			(let ((novo-tabuleiro (funcall op linha coluna (get-tabuleiro no) simbolo)))
+				(cond
+					((null novo-tabuleiro) nil)
+					(T 
+						(cond
+							((= simbolo *jogador1*) (constroi-no novo-tabuleiro (1+ (get-profundidade no)) 0 (+ caixas-jogador1 (incrementa-caixas (get-tabuleiro no) novo-tabuleiro)) caixas-jogador2))
+							((= simbolo *jogador2*) (constroi-no novo-tabuleiro (1+ (get-profundidade no)) 0 caixas-jogador1 (+ caixas-jogador2 (incrementa-caixas (get-tabuleiro no) novo-tabuleiro))))
+						)
+					)
+				)
+			)) 
+			operadores
+		)
+	)
+
+	;(funcall f-utilidade novo-tabuleiro) - colocar no lugar da utlidade
+
+	;;tabuleiro-equalp (tabuleiro1 tabuleiro2) predicado que compara 2 tabuleiros
+	(defun tabuleiro-equalp (tabuleiro1 tabuleiro2) "Predicado que devolve T se os tabuleiros sao iguais"
+		(cond
+			((and (equal (get-arcos-horizontais tabuleiro1) (get-arcos-horizontais tabuleiro2)) (equal (get-arcos-verticais tabuleiro1) (get-arcos-verticais tabuleiro2))) T)
+			(T nil)
+		)
+	)
+
+	;;Remove-nil (lista)
+	;;teste: (remove-nil '(nil 1 2))
+	;;resultado: (1 2)
+	(defun remove-nil (lista) "Funcao que remove todos os nil's da parte de primeira ordem da lista"
+		(cond
+			((null lista) nil)
+			((null (car lista)) (remove-nil (cdr lista)))
+			(T (cons (car lista) (remove-nil (cdr lista))))
+		)
+	)
+
+
+	;;incrementa-caixas
+	(defun incrementa-caixas (tabuleiro-before tabuleiro-after) "Funcao que contem a logica de incrementar caixas no jogador que jogou caso este feche caixa"
+		(let ((caixas-tabuleiro-before (get-numero-caixas-fechadas tabuleiro-before)) (caixas-tabuleiro-after (get-numero-caixas-fechadas tabuleiro-after)))
+			(cond
+				((> caixas-tabuleiro-after caixas-tabuleiro-before) (- caixas-tabuleiro-after caixas-tabuleiro-before))
+				(T 0)
+			)
+		)
+	)
+
+
+	(defun alisa (lista) "Retorna uma lista com todos os átomos na lista principal"
+		(cond
+			((null lista) nil)
+			(T (cond 
+					((atom (car lista)) (cons (car lista) (alisa (cdr lista))))
+					(T (append (alisa (car lista)) (alisa (cdr lista))))
+				)
+			)
+		)
+	)
+	
+	;;vencedor-p (tabuleiro caixas-jogador1 caixas-jogador2) (voltar a fazer)
+	(defun vencedor-p (tabuleiro caixas-jogador1 caixas-jogador2) "Função que devolve, caso todas as caixas do tabuleiro se encontrem fechadas, o vencedor"
+		(let ((caixas-ganhar (condicao-caixas (* (length (get-arcos-verticais tabuleiro)) (length (get-arcos-horizontais tabuleiro))))))
+			(cond
+				((or (null caixas-jogador1) (null caixas-jogador2)) nil)
+				((or (<= caixas-ganhar caixas-jogador1) (<=  caixas-ganhar caixas-jogador1)) T)
+				(T nil)
+			)
+		)
+	)
+
+
+	(defun condicao-caixas (numero-total-caixas) "Funcao auxiliar que calcula o numero minimo de caixas para ganhar dependendo do tabuleiro"
+		(cond
+			((= (mod numero-total-caixas 2) 0) (1+ (/ numero-total-caixas 2)))
+			(T (/ (1+ numero-total-caixas) 2))
+		)
+	)
+
+	(defun trocar-peca (peca)
+	  "Troca a peca de um jogador para a peca de outro jogador."
+	  (cond
+		((= peca *jogador1*) *jogador2*)
+		((= peca *jogador2*) *jogador1*)
+		)
+	)
+
